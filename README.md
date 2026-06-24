@@ -38,7 +38,9 @@ CfPersonalAssetDashboard/
 
 - 默认记账币种为 `CNY`。
 - `asset_locations.current_amount` 存储该资产位置原币种下的当前余额。
-- `asset_history.change_amount` 与 `final_amount` 同样使用该资产位置原币种。
+- `asset_history.final_amount` 是该资产位置在 `snapshot_time` 的余额快照。
+- `asset_history.change_amount` 由系统根据上一条快照自动计算，仅用于展示增减变化。
+- `asset_locations.current_amount` 始终来自该资产位置最新一条历史快照；没有历史记录时使用 `initial_amount`。
 - 汇率 KV 以 `CNY` 为基准，即 `1 CNY = rates[CODE] CODE`。
 - 将外币折算为人民币时使用：`amount / rates[CODE]`。
 - 将人民币展示为其他币种时使用：`amount * rates[CODE]`。
@@ -106,4 +108,20 @@ npm run deploy:api
 - Pages project: `personal-asset-dashboard`
 - Pages domain: `https://personal-asset-dashboard.pages.dev`
 
-The API Worker, D1 schema, KV binding, and daily cron schedule are deployed. The web app builds successfully to [apps/web/dist](/Users/lxx/Documents/CfPersonalAssetDashboard/apps/web/dist), but the Pages deployment upload still needs to be completed once local Wrangler can access its `@esbuild/darwin-arm64` optional dependency or a Git remote is connected.
+The API Worker, D1 schema, KV binding, daily cron schedule, GitHub-connected Pages project, and production Pages deployment are live. Cloudflare Pages builds from `lxxself/CfPersonAssetDashboard` on the `main` branch.
+
+## Authentication
+
+The API supports a single-user password gate through the Worker secret `DASHBOARD_PASSWORD`.
+
+```bash
+npx wrangler secret put DASHBOARD_PASSWORD --name personal-asset-dashboard-api
+```
+
+The frontend stores the entered password in `localStorage` and sends it as:
+
+```text
+Authorization: Bearer <DASHBOARD_PASSWORD>
+```
+
+If `DASHBOARD_PASSWORD` is not configured, the API allows requests without authentication. Production should always set this secret.

@@ -2,6 +2,7 @@ export type Bindings = {
   DB: D1Database;
   ASSET_KV: KVNamespace;
   EXCHANGE_RATE_API_URL?: string;
+  DASHBOARD_PASSWORD?: string;
 };
 
 export type AssetLocationRow = {

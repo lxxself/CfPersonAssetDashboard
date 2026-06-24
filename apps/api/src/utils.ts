@@ -5,7 +5,12 @@ export const EXCHANGE_RATES_KEY = "exchange_rates";
 export function jsonError(message: string, status = 400) {
   return new Response(JSON.stringify({ error: message }), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8" }
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "access-control-allow-origin": "*",
+      "access-control-allow-headers": "content-type, authorization",
+      "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS"
+    }
   });
 }
 

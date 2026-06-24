@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { Bindings, AssetHistoryRow, AssetLocationRow } from "./types";
 import { getExchangeRates, refreshExchangeRates } from "./exchange";
+import { recalculateLocationBalance } from "./history";
 import { buildLocationTrend, buildTotalTrend } from "./trends";
 import {
   clampLocationSort,
@@ -18,7 +19,29 @@ import {
 
 export const app = new Hono<{ Bindings: Bindings }>();
 
-app.use("*", cors());
+app.use(
+  "*",
+  cors({
+    allowHeaders: ["content-type", "authorization"],
+    allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
+  })
+);
+
+app.use("/api/*", async (c, next) => {
+  if (c.req.method === "OPTIONS" || c.req.path === "/api/health") {
+    return next();
+  }
+  const password = c.env.DASHBOARD_PASSWORD;
+  if (!password) {
+    return next();
+  }
+  const auth = c.req.header("authorization") || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
+  if (token !== password) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  return next();
+});
 
 app.get("/api/health", (c) => c.json({ ok: true }));
 
@@ -66,6 +89,9 @@ app.post("/api/asset-locations", async (c) => {
     return jsonError("name is required");
   }
 
+  if (typeof body.currency !== "string" || !/^[a-zA-Z]{3}$/.test(body.currency)) {
+    return jsonError("currency is required");
+  }
   const currency = normalizeCurrency(body.currency);
   const initialAmount = toNumber(body.initial_amount, 0);
   const currentAmount = body.current_amount === undefined ? initialAmount : toNumber(body.current_amount, initialAmount);
@@ -108,6 +134,14 @@ app.patch("/api/asset-locations/:id", async (c) => {
   }
 
   const currency = body.currency === undefined ? current.currency : normalizeCurrency(body.currency, current.currency);
+  if (currency !== current.currency) {
+    const count = await c.env.DB.prepare("SELECT COUNT(*) AS count FROM asset_history WHERE location_id = ?")
+      .bind(id)
+      .first<{ count: number }>();
+    if ((count?.count || 0) > 0) {
+      return jsonError("currency cannot be changed after history records exist");
+    }
+  }
   const initialAmount = body.initial_amount === undefined ? current.initial_amount : toNumber(body.initial_amount, current.initial_amount);
   const currentAmount = body.current_amount === undefined ? current.current_amount : toNumber(body.current_amount, current.current_amount);
   const tags = body.tags === undefined ? current.tags : JSON.stringify(normalizeTags(body.tags));
@@ -121,7 +155,13 @@ app.patch("/api/asset-locations/:id", async (c) => {
     .bind(name, currency, initialAmount, currentAmount, tags, id)
     .first<AssetLocationRow>();
 
-  return c.json({ item: row ? toAssetLocation(row) : null });
+  if (row) {
+    await recalculateLocationBalance(c.env, row);
+    const refreshed = await c.env.DB.prepare("SELECT * FROM asset_locations WHERE id = ?").bind(id).first<AssetLocationRow>();
+    return c.json({ item: refreshed ? toAssetLocation(refreshed) : toAssetLocation(row) });
+  }
+
+  return c.json({ item: null });
 });
 
 app.delete("/api/asset-locations/:id", async (c) => {
@@ -179,26 +219,59 @@ app.post("/api/asset-locations/:id/history", async (c) => {
   }
 
   const body = await c.req.json<Record<string, unknown>>();
-  const changeAmount = toNumber(body.change_amount, Number.NaN);
-  if (!Number.isFinite(changeAmount)) {
-    return jsonError("change_amount must be a number");
+  const finalAmount = toNumber(body.final_amount ?? body.amount ?? body.current_amount, Number.NaN);
+  if (!Number.isFinite(finalAmount)) {
+    return jsonError("final_amount must be a number");
   }
-  const finalAmount = location.current_amount + changeAmount;
+  const changeAmount = finalAmount - location.current_amount;
   const snapshotTime = typeof body.snapshot_time === "string" ? body.snapshot_time : new Date().toISOString();
   const note = body.note === undefined ? null : String(body.note);
   const historyId = crypto.randomUUID();
 
-  const statements = [
-    c.env.DB.prepare(
-      `INSERT INTO asset_history (id, location_id, change_amount, final_amount, snapshot_time, note)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).bind(historyId, locationId, changeAmount, finalAmount, snapshotTime, note),
-    c.env.DB.prepare("UPDATE asset_locations SET current_amount = ? WHERE id = ?").bind(finalAmount, locationId)
-  ];
-  await c.env.DB.batch(statements);
+  await c.env.DB.prepare(
+    `INSERT INTO asset_history (id, location_id, change_amount, final_amount, snapshot_time, note)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  )
+    .bind(historyId, locationId, changeAmount, finalAmount, snapshotTime, note)
+    .run();
+  await recalculateLocationBalance(c.env, location);
 
   const row = await c.env.DB.prepare("SELECT * FROM asset_history WHERE id = ?").bind(historyId).first<AssetHistoryRow>();
   return c.json({ item: row }, 201);
+});
+
+app.patch("/api/asset-history/:id", async (c) => {
+  const id = c.req.param("id");
+  const history = await c.env.DB.prepare("SELECT * FROM asset_history WHERE id = ?").bind(id).first<AssetHistoryRow>();
+  if (!history) {
+    return jsonError("asset history not found", 404);
+  }
+  const location = await c.env.DB.prepare("SELECT * FROM asset_locations WHERE id = ?")
+    .bind(history.location_id)
+    .first<AssetLocationRow>();
+  if (!location) {
+    return jsonError("asset location not found", 404);
+  }
+
+  const body = await c.req.json<Record<string, unknown>>();
+  const finalAmount =
+    body.final_amount === undefined && body.amount === undefined && body.current_amount === undefined
+      ? history.final_amount
+      : toNumber(body.final_amount ?? body.amount ?? body.current_amount, Number.NaN);
+  if (!Number.isFinite(finalAmount)) {
+    return jsonError("final_amount must be a number");
+  }
+  const snapshotTime = typeof body.snapshot_time === "string" ? body.snapshot_time : history.snapshot_time;
+  const note = body.note === undefined ? history.note : body.note === null ? null : String(body.note);
+
+  await c.env.DB.prepare(
+    "UPDATE asset_history SET final_amount = ?, snapshot_time = ?, note = ? WHERE id = ?"
+  )
+    .bind(finalAmount, snapshotTime, note, id)
+    .run();
+  await recalculateLocationBalance(c.env, location);
+  const row = await c.env.DB.prepare("SELECT * FROM asset_history WHERE id = ?").bind(id).first<AssetHistoryRow>();
+  return c.json({ item: row });
 });
 
 app.delete("/api/asset-history/:id", async (c) => {
@@ -215,14 +288,7 @@ app.delete("/api/asset-history/:id", async (c) => {
   }
 
   await c.env.DB.prepare("DELETE FROM asset_history WHERE id = ?").bind(id).run();
-  const latest = await c.env.DB.prepare(
-    "SELECT final_amount FROM asset_history WHERE location_id = ? ORDER BY snapshot_time DESC LIMIT 1"
-  )
-    .bind(history.location_id)
-    .first<{ final_amount: number }>();
-  await c.env.DB.prepare("UPDATE asset_locations SET current_amount = ? WHERE id = ?")
-    .bind(latest?.final_amount ?? location.initial_amount, history.location_id)
-    .run();
+  await recalculateLocationBalance(c.env, location);
 
   return c.json({ deleted: true });
 });

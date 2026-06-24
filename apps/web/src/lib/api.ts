@@ -35,17 +35,41 @@ export type Summary = {
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://personal-asset-dashboard-api.xxl.workers.dev";
+const TOKEN_KEY = "asset-dashboard-token";
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    path: string
+  ) {
+    super(`API ${status}: ${path}`);
+  }
+}
+
+export function getAuthToken() {
+  return localStorage.getItem(TOKEN_KEY) || "";
+}
+
+export function setAuthToken(token: string) {
+  if (token) {
+    localStorage.setItem(TOKEN_KEY, token);
+  } else {
+    localStorage.removeItem(TOKEN_KEY);
+  }
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getAuthToken();
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
       "content-type": "application/json",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...(init?.headers || {})
     },
     ...init
   });
   if (!response.ok) {
-    throw new Error(`API ${response.status}: ${path}`);
+    throw new ApiError(response.status, path);
   }
   return response.json() as Promise<T>;
 }
@@ -58,8 +82,16 @@ export const api = {
     request<{ currency: string; trend: TrendPoint[] }>(`/api/asset-locations/${id}/trend?range=${range}`),
   createLocation: (body: Record<string, unknown>) =>
     request<{ item: AssetLocation }>("/api/asset-locations", { method: "POST", body: JSON.stringify(body) }),
+  updateLocation: (id: string, body: Record<string, unknown>) =>
+    request<{ item: AssetLocation }>(`/api/asset-locations/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteLocation: (id: string) =>
+    request<{ deleted: boolean }>(`/api/asset-locations/${id}`, { method: "DELETE" }),
   createHistory: (id: string, body: Record<string, unknown>) =>
-    request<{ item: AssetHistory }>(`/api/asset-locations/${id}/history`, { method: "POST", body: JSON.stringify(body) })
+    request<{ item: AssetHistory }>(`/api/asset-locations/${id}/history`, { method: "POST", body: JSON.stringify(body) }),
+  updateHistory: (id: string, body: Record<string, unknown>) =>
+    request<{ item: AssetHistory }>(`/api/asset-history/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteHistory: (id: string) =>
+    request<{ deleted: boolean }>(`/api/asset-history/${id}`, { method: "DELETE" })
 };
 
 const now = new Date("2026-06-23T10:00:00.000Z").toISOString();
