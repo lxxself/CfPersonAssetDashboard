@@ -1,0 +1,19 @@
+{
+  "name": "cf-personal-asset-dashboard",
+  "private": true,
+  "scripts": {
+    "dev:api": "npm --workspace apps/api run dev",
+    "dev:web": "npm --workspace apps/web run dev",
+    "deploy:api": "npm --workspace apps/api run deploy",
+    "build:web": "npm --workspace apps/web run build",
+    "preview:web": "npm --workspace apps/web run preview",
+    "typecheck": "npm --workspace apps/api run typecheck"
+  },
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}

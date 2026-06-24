@@ -1,0 +1,23 @@
+name = "personal-asset-dashboard-api"
+main = "src/index.ts"
+compatibility_date = "2026-06-23"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[triggers]
+crons = ["0 2 * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "personal-asset-dashboard"
+database_id = "c8833c34-bc9a-47ed-8cad-9c8b7baefb6b"
+
+[[kv_namespaces]]
+binding = "ASSET_KV"
+id = "a39d36e0532f426e9763f0b7271fdb00"
+
+[vars]
+EXCHANGE_RATE_API_URL = "https://open.er-api.com/v6/latest/CNY"
