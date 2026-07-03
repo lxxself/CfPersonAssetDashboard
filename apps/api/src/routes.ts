@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import type { Bindings, AssetHistoryRow, AssetLocationRow } from "./types";
 import { getExchangeRates, refreshExchangeRates } from "./exchange";
 import { recalculateLocationBalance } from "./history";
+import { createBackup, restoreBackup } from "./backup";
 import { buildLocationTrend, buildTotalTrend } from "./trends";
 import {
   clampLocationSort,
@@ -55,6 +56,27 @@ app.post("/api/exchange-rates/refresh", async (c) => {
   } catch (error) {
     console.warn(JSON.stringify({ event: "exchange_rates_refresh_failed", message: String(error) }));
     return c.json(await getExchangeRates(c.env), 202);
+  }
+});
+
+app.get("/api/backup", async (c) => {
+  const backup = await createBackup(c.env);
+  return new Response(JSON.stringify(backup, null, 2), {
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "content-disposition": `attachment; filename="asset-dashboard-backup-${backup.exported_at.slice(0, 10)}.json"`,
+      "cache-control": "no-store"
+    }
+  });
+});
+
+app.post("/api/backup/restore", async (c) => {
+  try {
+    const result = await restoreBackup(c.env, await c.req.json<unknown>());
+    return c.json({ restored: true, ...result });
+  } catch (error) {
+    console.warn(JSON.stringify({ event: "backup_restore_rejected", message: String(error) }));
+    return jsonError(error instanceof Error ? error.message : "invalid backup file");
   }
 });
 

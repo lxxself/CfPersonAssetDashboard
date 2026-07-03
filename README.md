@@ -125,3 +125,12 @@ Authorization: Bearer <DASHBOARD_PASSWORD>
 ```
 
 If `DASHBOARD_PASSWORD` is not configured, the API allows requests without authentication. Production should always set this secret.
+
+## Data Backup And Restore
+
+The dashboard can export a complete, versioned JSON backup from the header. The file is human-readable and contains asset locations, tags, and every balance snapshot.
+
+- `GET /api/backup` downloads the JSON backup.
+- `POST /api/backup/restore` validates and replaces the D1 data.
+
+Restore recalculates each derived `change_amount` and every location's `current_amount` from snapshot order. Both endpoints require the same `DASHBOARD_PASSWORD` authentication as the rest of the API. Export the current data before restoring because restore replaces all asset locations and history records.

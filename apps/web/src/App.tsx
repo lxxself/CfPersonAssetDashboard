@@ -16,6 +16,8 @@ import {
   BarChart3,
   CalendarDays,
   CircleDollarSign,
+  DatabaseBackup,
+  Download,
   Moon,
   Pencil,
   Plus,
@@ -24,10 +26,11 @@ import {
   Sun,
   Tags,
   Trash2,
+  Upload,
   WalletCards,
   X
 } from "lucide-react";
-import { ApiError, api, getAuthToken, mockHistory, mockLocationTrend, mockLocations, mockSummary, setAuthToken, type AssetHistory, type AssetLocation, type Summary, type TrendPoint } from "./lib/api";
+import { ApiError, api, getAuthToken, mockHistory, mockLocationTrend, mockLocations, mockSummary, setAuthToken, type AssetHistory, type AssetLocation, type BackupFile, type Summary, type TrendPoint } from "./lib/api";
 import { cn, formatDate, formatDateTime, formatMoney } from "./lib/utils";
 import { Badge, Button, Card, Field, Select } from "./components/ui";
 
@@ -58,6 +61,7 @@ export function App() {
   const [authenticated, setAuthenticated] = useState(() => Boolean(getAuthToken()));
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
+  const [backupOpen, setBackupOpen] = useState(false);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -183,6 +187,10 @@ export function App() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Button onClick={() => setBackupOpen(true)} title="数据备份与恢复">
+              <DatabaseBackup className="h-4 w-4" />
+              <span className="hidden sm:inline">数据备份</span>
+            </Button>
             <Button onClick={() => void loadDashboard()} disabled={refreshing} title="刷新">
               <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
               刷新
@@ -320,7 +328,126 @@ export function App() {
           void loadDashboard();
         }}
       />
+      <BackupDialog open={backupOpen} onClose={() => setBackupOpen(false)} onRestored={() => void loadDashboard()} />
     </main>
+  );
+}
+
+function BackupDialog({ open, onClose, onRestored }: { open: boolean; onClose: () => void; onRestored: () => void }) {
+  const [backup, setBackup] = useState<BackupFile | null>(null);
+  const [fileName, setFileName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (open) {
+      setBackup(null);
+      setFileName("");
+      setMessage("");
+      setError("");
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  async function exportData() {
+    setBusy(true);
+    setError("");
+    try {
+      const blob = await api.downloadBackup();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `asset-dashboard-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setMessage("备份文件已导出");
+    } catch {
+      setError("导出失败，请稍后重试");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function selectFile(file: File | undefined) {
+    setBackup(null);
+    setMessage("");
+    setError("");
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text()) as BackupFile;
+      if (parsed.format !== "cf-personal-asset-dashboard" || parsed.version !== 1 || !Array.isArray(parsed.data?.asset_locations) || !Array.isArray(parsed.data?.asset_history)) {
+        throw new Error("invalid backup");
+      }
+      setBackup(parsed);
+      setFileName(file.name);
+    } catch {
+      setError("无法识别该备份文件，请选择由本看板导出的 JSON 文件");
+    }
+  }
+
+  async function restoreData() {
+    if (!backup || !confirm("恢复会覆盖当前全部资产位置和历史记录，确定继续？")) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api.restoreBackup(backup);
+      setMessage(`恢复完成：${result.locations} 个资产位置，${result.history_records} 条金额记录`);
+      setBackup(null);
+      setFileName("");
+      onRestored();
+    } catch {
+      setError("恢复失败，当前数据未被替换。请检查备份文件内容");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/30 px-4 backdrop-blur-sm">
+      <Card className="w-full max-w-lg p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">数据备份与恢复</h2>
+            <p className="mt-1 text-sm text-muted-foreground">JSON 格式，可直接阅读和程序解析</p>
+          </div>
+          <Button onClick={onClose} className="h-8 w-8 px-0" title="关闭"><X className="h-4 w-4" /></Button>
+        </div>
+
+        <div className="mt-5 grid gap-4">
+          <section className="rounded-md border border-border p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="font-medium">导出完整备份</p>
+                <p className="mt-1 text-sm text-muted-foreground">包含资产位置、标签及全部金额快照</p>
+              </div>
+              <Button onClick={() => void exportData()} disabled={busy}><Download className="h-4 w-4" />导出</Button>
+            </div>
+          </section>
+
+          <section className="rounded-md border border-border p-4">
+            <p className="font-medium">从备份恢复</p>
+            <p className="mt-1 text-sm text-muted-foreground">恢复时将覆盖看板中的现有数据</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <label className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-border bg-card px-3 text-sm font-medium transition hover:bg-muted">
+                <Upload className="h-4 w-4" />选择 JSON 文件
+                <input type="file" accept="application/json,.json" className="hidden" onChange={(event) => void selectFile(event.target.files?.[0])} />
+              </label>
+              {backup && <Button onClick={() => void restoreData()} disabled={busy} className="border-rose-300 text-rose-600 dark:border-rose-900">确认覆盖并恢复</Button>}
+            </div>
+            {backup && (
+              <div className="mt-3 rounded-md bg-muted px-3 py-2 text-sm">
+                <p className="truncate font-medium">{fileName}</p>
+                <p className="mt-1 text-muted-foreground">{backup.data.asset_locations.length} 个资产位置 · {backup.data.asset_history.length} 条金额记录 · 导出于 {formatDateTime(backup.exported_at)}</p>
+              </div>
+            )}
+          </section>
+        </div>
+        {message && <p className="mt-4 text-sm text-emerald-600">{message}</p>}
+        {error && <p className="mt-4 text-sm text-rose-500">{error}</p>}
+      </Card>
+    </div>
   );
 }
 

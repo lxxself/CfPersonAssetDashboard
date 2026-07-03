@@ -74,6 +74,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export type BackupFile = {
+  format: "cf-personal-asset-dashboard";
+  version: 1;
+  exported_at: string;
+  base_currency: "CNY";
+  data: { asset_locations: AssetLocation[]; asset_history: AssetHistory[] };
+};
+
+async function downloadBackup() {
+  const token = getAuthToken();
+  const response = await fetch(`${API_BASE}/api/backup`, {
+    headers: token ? { authorization: `Bearer ${token}` } : {}
+  });
+  if (!response.ok) throw new ApiError(response.status, "/api/backup");
+  return response.blob();
+}
+
 export const api = {
   summary: () => request<Summary>("/api/summary"),
   locations: (params: URLSearchParams) => request<{ items: AssetLocation[] }>(`/api/asset-locations?${params}`),
@@ -91,7 +108,13 @@ export const api = {
   updateHistory: (id: string, body: Record<string, unknown>) =>
     request<{ item: AssetHistory }>(`/api/asset-history/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteHistory: (id: string) =>
-    request<{ deleted: boolean }>(`/api/asset-history/${id}`, { method: "DELETE" })
+    request<{ deleted: boolean }>(`/api/asset-history/${id}`, { method: "DELETE" }),
+  downloadBackup,
+  restoreBackup: (backup: BackupFile) =>
+    request<{ restored: true; locations: number; history_records: number }>("/api/backup/restore", {
+      method: "POST",
+      body: JSON.stringify(backup)
+    })
 };
 
 const now = new Date("2026-06-23T10:00:00.000Z").toISOString();
