@@ -34,6 +34,14 @@ export type Summary = {
   trend: TrendPoint[];
 };
 
+export type ExchangeRates = {
+  base: "CNY";
+  rates: Record<string, number>;
+  updated_at: string;
+  source?: string;
+  fetched_at?: string;
+};
+
 const API_BASE = import.meta.env.VITE_API_BASE || "https://personal-asset-dashboard-api.xxl.workers.dev";
 const TOKEN_KEY = "asset-dashboard-token";
 
@@ -93,6 +101,8 @@ async function downloadBackup() {
 
 export const api = {
   summary: () => request<Summary>("/api/summary"),
+  refreshExchangeRates: () =>
+    request<ExchangeRates>("/api/exchange-rates/refresh", { method: "POST" }),
   locations: (params: URLSearchParams) => request<{ items: AssetLocation[] }>(`/api/asset-locations?${params}`),
   history: (id: string) => request<{ items: AssetHistory[] }>(`/api/asset-locations/${id}/history`),
   trend: (id: string, range: string) =>

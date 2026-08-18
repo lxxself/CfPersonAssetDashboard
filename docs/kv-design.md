@@ -10,7 +10,7 @@ ASSET_KV
 
 ## Exchange Rates Cache
 
-The Worker cron task writes one value per day to a stable KV key:
+The dashboard's manual exchange-rate sync writes the latest value to a stable KV key:
 
 ```text
 exchange_rates
@@ -67,9 +67,9 @@ display_amount = currency == "CNY" ? amount_cny : amount_cny * rates[currency]
 
 ## Failure Behavior
 
-If the daily exchange-rate API request fails:
+If the manual exchange-rate API request fails:
 
 - keep the existing `exchange_rates` value unchanged;
-- log a structured warning with the source, HTTP status or error message, and scheduled time;
+- log a structured warning with the source, HTTP status, or error message;
 - let API reads continue using the last successful cache;
 - if no cache exists yet, the backend should fall back to `{ "base": "CNY", "rates": { "CNY": 1 } }`.

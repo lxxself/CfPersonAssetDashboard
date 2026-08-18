@@ -58,6 +58,8 @@ export function App() {
   const [editingLocation, setEditingLocation] = useState<AssetLocation | null>(null);
   const [isMock, setIsMock] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState("");
   const [authenticated, setAuthenticated] = useState(() => Boolean(getAuthToken()));
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
@@ -127,6 +129,25 @@ export function App() {
     }
   }
 
+  async function syncExchangeRates() {
+    setSyncing(true);
+    setSyncError("");
+    try {
+      await api.refreshExchangeRates();
+      await loadDashboard();
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setAuthenticated(false);
+        setAuthToken("");
+        setAuthError("请输入正确的访问密码");
+      } else {
+        setSyncError("同步失败，请稍后重试");
+      }
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   async function deleteLocation(location: AssetLocation) {
     if (!confirm(`删除「${location.name}」及其全部历史记录？`)) {
       return;
@@ -181,8 +202,9 @@ export function App() {
             <div>
               <h1 className="text-xl font-semibold">个人资产看板</h1>
               <p className="text-sm text-muted-foreground">
-                汇率更新 {summary.exchange_rates_updated_at}
+                汇率同步于 {summary.exchange_rates_updated_at}
                 {isMock ? " · 演示数据" : ""}
+                {syncError ? <span className="text-rose-500"> · {syncError}</span> : null}
               </p>
             </div>
           </div>
@@ -191,9 +213,10 @@ export function App() {
               <DatabaseBackup className="h-4 w-4" />
               <span className="hidden sm:inline">数据备份</span>
             </Button>
-            <Button onClick={() => void loadDashboard()} disabled={refreshing} title="刷新">
-              <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
-              刷新
+            <Button onClick={() => void syncExchangeRates()} disabled={refreshing || syncing} title="手动同步汇率">
+              <RefreshCw className={cn("h-4 w-4", (refreshing || syncing) && "animate-spin")} />
+              <span className="hidden sm:inline">手动同步</span>
+              <span className="sm:hidden">同步</span>
             </Button>
             <Button
               onClick={() => {

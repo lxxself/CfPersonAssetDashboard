@@ -15,7 +15,7 @@ export async function getExchangeRates(env: Bindings): Promise<ExchangeRatesCach
   return getFallbackRates();
 }
 
-export async function refreshExchangeRates(env: Bindings, scheduledTime?: number) {
+export async function refreshExchangeRates(env: Bindings) {
   const url = env.EXCHANGE_RATE_API_URL || "https://open.er-api.com/v6/latest/CNY";
   const response = await fetch(url, {
     headers: { accept: "application/json" }
@@ -44,7 +44,7 @@ export async function refreshExchangeRates(env: Bindings, scheduledTime?: number
   const cache: ExchangeRatesCache = {
     base: "CNY",
     rates,
-    updated_at: todayIsoDate(scheduledTime ? new Date(scheduledTime) : new Date()),
+    updated_at: todayIsoDate(new Date()),
     source: "open.er-api.com",
     fetched_at: new Date().toISOString()
   };

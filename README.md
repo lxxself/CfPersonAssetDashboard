@@ -67,7 +67,7 @@ GET    /api/asset-locations/:id/trend
 GET    /api/summary
 ```
 
-The scheduled handler in [apps/api/src/index.ts](/Users/lxx/Documents/CfPersonalAssetDashboard/apps/api/src/index.ts) refreshes `exchange_rates` once per day. The summary endpoint converts all assets to CNY with the cached rates and returns a filled trend series for sparse, low-frequency records.
+The dashboard's manual sync action calls `POST /api/exchange-rates/refresh` to update the `exchange_rates` cache. The summary endpoint converts all assets to CNY with the cached rates and returns a filled trend series for sparse, low-frequency records.
 
 ## Local Development
 
@@ -78,10 +78,10 @@ npm --workspace apps/api run db:migrate:local
 npm run dev:api
 ```
 
-Trigger the cron handler locally:
+Trigger a manual exchange-rate sync locally:
 
 ```bash
-curl http://localhost:8787/__scheduled
+curl -X POST http://localhost:8787/api/exchange-rates/refresh
 ```
 
 ## Deployment
@@ -108,7 +108,7 @@ npm run deploy:api
 - Pages project: `personal-asset-dashboard`
 - Pages domain: `https://personal-asset-dashboard.pages.dev`
 
-The API Worker, D1 schema, KV binding, daily cron schedule, GitHub-connected Pages project, and production Pages deployment are live. Cloudflare Pages builds from `lxxself/CfPersonAssetDashboard` on the `main` branch.
+The API Worker, D1 schema, KV binding, GitHub-connected Pages project, and production Pages deployment are live. Exchange rates are refreshed manually from the dashboard. Deploy the API after setting `crons = []` in `apps/api/wrangler.toml` to remove the existing Cloudflare cron trigger. Cloudflare Pages builds from `lxxself/CfPersonAssetDashboard` on the `main` branch.
 
 ## Authentication
 

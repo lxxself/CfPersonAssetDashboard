@@ -44,11 +44,11 @@ Apply D1 migrations locally:
 npm --workspace apps/api run db:migrate:local
 ```
 
-Test scheduled jobs locally:
+Test the manual exchange-rate sync locally:
 
 ```bash
 npm run dev:api
-curl http://localhost:8787/__scheduled
+curl -X POST http://localhost:8787/api/exchange-rates/refresh
 ```
 
 ## Deploy
