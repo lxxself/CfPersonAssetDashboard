@@ -1,14 +1,17 @@
-# API App
+# API app
 
 Cloudflare Workers API for the Personal Asset Dashboard.
 
 ## Bindings
 
-Configured in [wrangler.toml](/Users/lxx/Documents/CfPersonalAssetDashboard/apps/api/wrangler.toml):
+Configured in [wrangler.toml](wrangler.toml):
 
-- `DB`: Cloudflare D1 database.
-- `ASSET_KV`: Cloudflare KV namespace.
-- `EXCHANGE_RATE_API_URL`: defaults to `https://open.er-api.com/v6/latest/CNY`.
+- `DB`: Cloudflare D1 database for asset locations and history.
+- `ASSET_KV`: Cloudflare KV namespace for the exchange-rate cache.
+- `EXCHANGE_RATE_API_URL`: optional non-secret URL; defaults to `https://open.er-api.com/v6/latest/CNY`.
+- `DASHBOARD_PASSWORD`: Worker secret used for the single-user password gate.
+
+Create your own D1 database and KV namespace, then replace the resource IDs in `wrangler.toml` before remote deployment. Keep the binding names `DB` and `ASSET_KV`. Never put `DASHBOARD_PASSWORD` in this file.
 
 ## Endpoints
 
@@ -25,51 +28,57 @@ DELETE /api/asset-locations/:id
 
 GET    /api/asset-locations/:id/history?from=2026-01-01&to=2026-12-31
 POST   /api/asset-locations/:id/history
+PATCH  /api/asset-history/:id
 DELETE /api/asset-history/:id
 
 GET    /api/asset-locations/:id/trend?range=all|1y|6m|1m|1w
 GET    /api/summary
+GET    /api/backup
+POST   /api/backup/restore
 ```
 
-## Local Development
+`GET /api/health` is public. When `DASHBOARD_PASSWORD` is set, every other API route requires `Authorization: Bearer <password>`.
+
+## Local development
+
+From the repository root:
 
 ```bash
 npm install
+cp apps/api/.dev.vars.example apps/api/.dev.vars
+npm --workspace apps/api run db:migrate:local
 npm run dev:api
 ```
 
-Apply D1 migrations locally:
+Use a second terminal for the frontend:
 
 ```bash
-npm --workspace apps/api run db:migrate:local
+npm run dev:web
 ```
 
 Test the manual exchange-rate sync locally:
 
 ```bash
-npm run dev:api
 curl -X POST http://localhost:8787/api/exchange-rates/refresh
 ```
 
 ## Deploy
 
-1. Create resources:
+For a guided API deployment, use the button in the [root README](../../README.md). It targets this isolated Worker directory; the Pages frontend is still deployed separately.
 
 ```bash
+npx wrangler login
 npx wrangler d1 create personal-asset-dashboard
 npx wrangler kv namespace create ASSET_KV
 ```
 
-2. Copy the returned IDs into [wrangler.toml](/Users/lxx/Documents/CfPersonalAssetDashboard/apps/api/wrangler.toml).
-
-3. Apply remote D1 migrations:
-
-```bash
-npm --workspace apps/api run db:migrate:remote
-```
-
-4. Deploy:
+Copy the returned D1 and KV IDs into [wrangler.toml](wrangler.toml), then deploy:
 
 ```bash
 npm run deploy:api
+npx wrangler secret put DASHBOARD_PASSWORD --config apps/api/wrangler.toml
 ```
+
+The deploy script applies pending remote migrations through the `DB` binding before publishing the Worker. The migration command is intentionally binding-based so it also works when the database is renamed during a button deployment.
+
+The secret command deploys the new secret version immediately. Keep `crons = []`; exchange rates are refreshed manually from the UI.

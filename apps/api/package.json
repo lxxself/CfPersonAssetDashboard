@@ -4,17 +4,24 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "db:migrate:local": "wrangler d1 migrations apply personal-asset-dashboard --local",
-    "db:migrate:remote": "wrangler d1 migrations apply personal-asset-dashboard --remote",
-    "db:execute:schema:local": "wrangler d1 execute personal-asset-dashboard --local --file=./schema.sql"
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "db:execute:schema:local": "wrangler d1 execute DB --local --file=./schema.sql"
+  },
+  "cloudflare": {
+    "bindings": {
+      "DASHBOARD_PASSWORD": {
+        "description": "Choose a long, unique password for this single-user dashboard. Store it as a Worker secret and never commit it to the repository."
+      }
+    }
   },
   "dependencies": {
-    "hono": "^4.6.0"
+    "hono": "^4.13.7"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240620.0",
-    "wrangler": "^4.0.0"
+    "wrangler": "^4.130.0"
   }
 }

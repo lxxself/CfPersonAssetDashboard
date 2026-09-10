@@ -42,7 +42,8 @@ export type ExchangeRates = {
   fetched_at?: string;
 };
 
-const API_BASE = import.meta.env.VITE_API_BASE || "https://personal-asset-dashboard-api.xxl.workers.dev";
+const configuredApiBase = import.meta.env.VITE_API_BASE?.trim();
+const API_BASE = (configuredApiBase || (import.meta.env.DEV ? "http://localhost:8787" : "")).replace(/\/+$/, "");
 const TOKEN_KEY = "asset-dashboard-token";
 
 export class ApiError extends Error {
@@ -136,17 +137,17 @@ const months = [8, 7, 6, 5, 4, 3, 2, 1, 0].map((offset) => {
 
 export const mockSummary: Summary = {
   base_currency: "CNY",
-  total_cny: 428960.42,
+  total_cny: 42896.42,
   totals: {
-    CNY: 428960.42,
-    USD: 59008.19,
-    HKD: 461236.64
+    CNY: 42896.42,
+    USD: 5900.82,
+    HKD: 46123.66
   },
   currencies: ["CNY", "USD", "HKD"],
   exchange_rates_updated_at: "2026-06-23",
   trend: months.map((date, index) => ({
     date,
-    value_cny: [328000, 337500, 352200, 351100, 371800, 382300, 399200, 413700, 428960][index],
+    value_cny: [32800, 33750, 35220, 35110, 37180, 38230, 39920, 41370, 42896][index],
     source: index % 2 === 0 ? "event" : "filled",
     record_count: index % 2 === 0 ? 1 : 0
   }))
@@ -155,40 +156,40 @@ export const mockSummary: Summary = {
 export const mockLocations: AssetLocation[] = [
   {
     id: "loc_1",
-    name: "招商银行卡",
+    name: "示例现金账户",
     currency: "CNY",
-    initial_amount: 120000,
-    current_amount: 156430.38,
-    tags: ["现金", "银行卡"],
+    initial_amount: 12000,
+    current_amount: 15643.04,
+    tags: ["示例", "现金"],
     created_at: months[0],
     updated_at: now
   },
   {
     id: "loc_2",
-    name: "美股券商账户",
+    name: "示例投资账户",
     currency: "USD",
-    initial_amount: 18000,
-    current_amount: 24650.72,
-    tags: ["证券", "海外"],
+    initial_amount: 1800,
+    current_amount: 2465.07,
+    tags: ["示例", "证券"],
     created_at: months[1],
     updated_at: now
   },
   {
     id: "loc_3",
-    name: "香港储蓄账户",
+    name: "示例外币账户",
     currency: "HKD",
-    initial_amount: 88000,
-    current_amount: 103200,
-    tags: ["现金", "海外"],
+    initial_amount: 8800,
+    current_amount: 10320,
+    tags: ["示例", "外币"],
     created_at: months[2],
     updated_at: now
   }
 ];
 
 export const mockHistory: AssetHistory[] = [
-  { id: "h1", location_id: "loc_1", change_amount: 8600, final_amount: 156430.38, snapshot_time: months[8], note: "工资结余" },
-  { id: "h2", location_id: "loc_1", change_amount: -2300, final_amount: 147830.38, snapshot_time: months[7], note: "旅行支出" },
-  { id: "h3", location_id: "loc_1", change_amount: 12000, final_amount: 150130.38, snapshot_time: months[6], note: "年中奖金" }
+  { id: "h1", location_id: "loc_1", change_amount: 860, final_amount: 15643.04, snapshot_time: months[8], note: "示例收入" },
+  { id: "h2", location_id: "loc_1", change_amount: -230, final_amount: 14783.04, snapshot_time: months[7], note: "示例支出" },
+  { id: "h3", location_id: "loc_1", change_amount: 1200, final_amount: 15013.04, snapshot_time: months[6], note: "示例入账" }
 ];
 
 export function mockLocationTrend(location: AssetLocation): TrendPoint[] {

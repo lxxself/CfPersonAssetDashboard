@@ -13,11 +13,13 @@ crons = []
 [[d1_databases]]
 binding = "DB"
 database_name = "personal-asset-dashboard"
-database_id = "c8833c34-bc9a-47ed-8cad-9c8b7baefb6b"
+# Replace this with the database_id returned by `wrangler d1 create` in your account.
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
 
 [[kv_namespaces]]
 binding = "ASSET_KV"
-id = "a39d36e0532f426e9763f0b7271fdb00"
+# Replace this with the id returned by `wrangler kv namespace create ASSET_KV`.
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
 
 [vars]
 EXCHANGE_RATE_API_URL = "https://open.er-api.com/v6/latest/CNY"
