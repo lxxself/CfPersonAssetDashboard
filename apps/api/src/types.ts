@@ -1,3 +1,5 @@
+import type { AssetHistory, AssetLocation, ExchangeRates, TrendPoint } from "@asset-dashboard/domain";
+
 export type Bindings = {
   DB: D1Database;
   ASSET_KV: KVNamespace;
@@ -25,21 +27,5 @@ export type AssetHistoryRow = {
   note: string | null;
 };
 
-export type AssetLocation = Omit<AssetLocationRow, "tags"> & {
-  tags: string[];
-};
-
-export type ExchangeRatesCache = {
-  base: "CNY";
-  rates: Record<string, number>;
-  updated_at: string;
-  source?: string;
-  fetched_at?: string;
-};
-
-export type TrendPoint = {
-  date: string;
-  value_cny: number;
-  source: "event" | "filled";
-  record_count: number;
-};
+export type { AssetHistory, AssetLocation, ExchangeRates, TrendPoint };
+export type ExchangeRatesCache = ExchangeRates;

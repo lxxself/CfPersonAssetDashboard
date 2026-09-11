@@ -16,14 +16,15 @@
 - KV 缓存汇率
 - 通过看板手动刷新汇率
 
-当前界面为简体中文。仓库不包含生产数据；前端仅在离线或请求失败时使用合成的示例数据作为回退展示。
+当前界面为简体中文。仓库不包含生产数据。看板支持受保护的 Cloudflare 云端模式，以及独立保存在当前浏览器中的离线模式。
 
 ## 架构
 
 ```text
 浏览器
   ├── Cloudflare Pages（静态 React 应用）
-  └── Cloudflare Worker API
+  ├── 浏览器 localStorage（离线资产空间和汇率缓存）
+  └── Cloudflare Worker API（云端模式）
         ├── D1：资产位置和余额历史
         ├── KV：汇率缓存
         └── 汇率服务商（仅在手动同步时调用）
@@ -38,6 +39,8 @@
 - 导出完整 JSON 备份，并在之后恢复。
 - 使用 Worker Secret 保护 API 路由。
 - 使用 Wrangler 的本地 D1/KV 模拟进行开发。
+- 打开首页时选择云端数据或本机离线数据；两个数据空间不会自动合并。
+- 首次在线访问并缓存 PWA 资源后，可以断网重新打开页面使用本机数据。
 
 ## 仓库结构
 
@@ -199,6 +202,7 @@ npx wrangler pages deploy apps/web/dist --project-name <your-pages-project>
 
 ```bash
 npm run typecheck
+npm test
 npm run build:web
 npm run preview:web
 ```
@@ -212,7 +216,7 @@ npm run preview:web
 
 ## API 概览
 
-配置 `DASHBOARD_PASSWORD` 后，除 `GET /api/health` 和 CORS 预检请求外，所有路由都需要认证。
+配置 `DASHBOARD_PASSWORD` 后，`GET /api/health` 和只读的 `GET /api/exchange-rates` 公开可访问；资产、汇总、备份、恢复和手动同步汇率接口都需要认证。
 
 ```text
 GET    /api/health
@@ -237,6 +241,9 @@ POST   /api/backup/restore
 
 - 仓库没有提交 `.env`、`.dev.vars`、备份、API key、token 或私钥文件。
 - 生产资产记录保存在你的 D1 数据库中，汇率缓存保存在你的 KV namespace 中；它们不会发送给前端构建系统。
+- 离线资产记录只保存在当前浏览器的 `localStorage` 明文存储中；切换到云端模式时不会自动上传或合并。能访问该浏览器配置文件的用户或扩展可能读取它。
+- Service Worker 只缓存静态页面壳和同源静态资源，不缓存 `/api/*` 响应，也不缓存带 Authorization 的请求。
+- 要完整离线打开页面，必须先至少在线成功访问一次页面，让浏览器下载页面壳、静态资源和 Service Worker；首次直接断网访问不在支持范围内。
 - 手动刷新汇率时会调用配置的汇率服务商。请求只包含货币汇率查询，不包含资产名称、余额、标签或历史记录。
 - JSON 备份包含全部资产名称、金额、标签、备注和历史记录。请把它当作财务记录处理，不要提交到仓库。
 - 前端会将输入的密码保存在浏览器 `localStorage`，并通过 HTTPS 以 Bearer token 发送。建议使用私密且可信的浏览器配置文件。
@@ -247,7 +254,7 @@ POST   /api/backup/restore
 
 ## 备份和恢复
 
-在看板中使用 **数据备份** 下载带版本信息的 JSON 文件。恢复操作会替换全部资产位置和历史记录，因此请先导出当前数据，并保留不止一份备份。
+在看板中使用 **数据备份** 下载带版本信息的 JSON 文件。恢复操作会替换当前所选数据空间中的全部资产位置和历史记录，因此请先导出当前数据，并保留不止一份备份。云端和离线空间保持独立，备份文件是两者之间的显式迁移方式。
 
 ## Cloudflare 文档
 

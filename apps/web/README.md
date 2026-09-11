@@ -2,6 +2,8 @@
 
 React/Vite frontend for the Personal Asset Dashboard, intended for Cloudflare Pages.
 
+The app provides two independent data spaces: authenticated cloud data from the Worker API and browser-local offline data stored in plaintext `localStorage`. The first visit asks which space to use and later remembers the last choice. The production build also emits a Service Worker and PWA manifest; it caches only the static shell, never API responses. Full offline reopening requires one successful online visit first so the shell can be cached.
+
 ## Development
 
 From the repository root:

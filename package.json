@@ -7,11 +7,15 @@
     "deploy:api": "npm --workspace apps/api run deploy",
     "build:web": "npm --workspace apps/web run build",
     "preview:web": "npm --workspace apps/web run preview",
-    "typecheck": "npm --workspace apps/api run typecheck"
+    "typecheck": "npm --workspace apps/api run typecheck",
+    "test:domain": "node --experimental-strip-types --test packages/domain/src/index.test.ts",
+    "test:local": "node --experimental-strip-types --test packages/domain/src/local-store.test.ts",
+    "test": "npm run test:domain && npm run test:local"
   },
   "workspaces": [
     "apps/api",
-    "apps/web"
+    "apps/web",
+    "packages/domain"
   ],
   "devDependencies": {
     "typescript": "^5.5.4"

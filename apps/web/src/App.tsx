@@ -30,9 +30,14 @@ import {
   WalletCards,
   X
 } from "lucide-react";
-import { ApiError, api, getAuthToken, mockHistory, mockLocationTrend, mockLocations, mockSummary, setAuthToken, type AssetHistory, type AssetLocation, type BackupFile, type Summary, type TrendPoint } from "./lib/api";
+import { getAvailableCurrencies, parseBackup } from "@asset-dashboard/domain";
+import { ApiError, getAuthToken, setAuthToken, type AssetHistory, type AssetLocation, type BackupFile, type ExchangeRates, type Summary, type TrendPoint } from "./lib/api";
 import { cn, formatDate, formatDateTime, formatMoney } from "./lib/utils";
 import { Badge, Button, Card, Field, Select } from "./components/ui";
+import { LocalStore } from "./lib/local-store";
+import { RemoteStore } from "./lib/remote-store";
+import { readRateCache, seedRateCache, writeRateCache } from "./lib/rates";
+import type { DashboardStore, RestoreResult, StoreMode } from "./lib/store";
 
 type SortKey = "created_at" | "current_amount" | "name";
 
@@ -43,49 +48,92 @@ const tagColors = [
   "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300"
 ];
 
+const MODE_KEY = "asset-dashboard-mode";
+
+function getSavedMode(): StoreMode | null {
+  const mode = localStorage.getItem(MODE_KEY);
+  return mode === "online" || mode === "offline" ? mode : null;
+}
+
+function emptySummary(rates: ExchangeRates): Summary {
+  return {
+    base_currency: "CNY",
+    total_cny: 0,
+    totals: { CNY: 0 },
+    currencies: ["CNY"],
+    available_currencies: ["CNY"],
+    unsupported_currencies: [],
+    exchange_rates_updated_at: rates.updated_at,
+    trend: []
+  };
+}
+
 export function App() {
   const [dark, setDark] = useState(false);
-  const [summary, setSummary] = useState<Summary>(mockSummary);
-  const [locations, setLocations] = useState<AssetLocation[]>(mockLocations);
+  const [rates, setRates] = useState<ExchangeRates>(() => readRateCache());
+  const [ratesReady, setRatesReady] = useState(false);
+  const [mode, setMode] = useState<StoreMode | null>(() => getSavedMode());
+  const [summary, setSummary] = useState<Summary>(() => emptySummary(readRateCache()));
+  const [locations, setLocations] = useState<AssetLocation[]>([]);
   const [selectedCurrency, setSelectedCurrency] = useState("CNY");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [currencyFilter, setCurrencyFilter] = useState("ALL");
   const [sort, setSort] = useState<SortKey>("created_at");
   const [query, setQuery] = useState("");
-  const [selectedLocation, setSelectedLocation] = useState<AssetLocation | null>(mockLocations[0]);
+  const [selectedLocation, setSelectedLocation] = useState<AssetLocation | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [locationFormOpen, setLocationFormOpen] = useState(false);
   const [editingLocation, setEditingLocation] = useState<AssetLocation | null>(null);
-  const [isMock, setIsMock] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
-  const [authenticated, setAuthenticated] = useState(() => Boolean(getAuthToken()));
+  const [dataError, setDataError] = useState("");
+  const [authenticated, setAuthenticated] = useState(() => getSavedMode() === "online" && Boolean(getAuthToken()));
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [backupOpen, setBackupOpen] = useState(false);
+
+  const store = useMemo<DashboardStore | null>(() => {
+    if (!mode) return null;
+    return mode === "online" ? new RemoteStore() : new LocalStore(rates);
+  }, [mode, rates]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void seedRateCache().then((nextRates) => {
+      if (!cancelled) {
+        setRates(nextRates);
+        setRatesReady(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
 
   useEffect(() => {
+    if (!store || (mode === "online" && !authenticated)) return;
     void loadDashboard();
-  }, [selectedTags, currencyFilter, sort]);
+  }, [store, mode, authenticated, selectedTags, currencyFilter, sort]);
 
   async function loadDashboard() {
+    if (!store) return;
     setRefreshing(true);
+    setDataError("");
     const params = new URLSearchParams({ sort, order: sort === "name" ? "asc" : "desc" });
     selectedTags.forEach((tag) => params.append("tag", tag));
     if (currencyFilter !== "ALL") {
       params.set("currency", currencyFilter);
     }
     try {
-      const [nextSummary, nextLocations] = await Promise.all([api.summary(), api.locations(params)]);
-      setSummary(nextSummary);
-      setLocations(nextLocations.items);
-      setIsMock(false);
-      if (!nextSummary.currencies.includes(selectedCurrency)) {
+      const next = await store.loadDashboard(params);
+      setSummary(next.summary);
+      setLocations(next.locations);
+      if (!next.summary.available_currencies.includes(selectedCurrency)) {
         setSelectedCurrency("CNY");
       }
     } catch (error) {
@@ -96,9 +144,7 @@ export function App() {
         setRefreshing(false);
         return;
       }
-      setSummary(mockSummary);
-      setLocations(mockLocations);
-      setIsMock(true);
+      setDataError(error instanceof Error ? error.message : mode === "offline" ? "本地数据读取失败" : "暂时无法连接云端服务");
     } finally {
       setRefreshing(false);
     }
@@ -106,19 +152,40 @@ export function App() {
 
   const allTags = useMemo(() => Array.from(new Set(locations.flatMap((item) => item.tags))).sort(), [locations]);
   const currencies = useMemo(() => Array.from(new Set(["ALL", ...summary.currencies, ...locations.map((item) => item.currency)])), [locations, summary]);
+  const availableCurrencies = useMemo(() => getAvailableCurrencies(rates), [rates]);
   const filteredLocations = useMemo(() => {
     return locations.filter((item) => item.name.toLowerCase().includes(query.toLowerCase()));
   }, [locations, query]);
 
-  const totalDisplay = summary.totals[selectedCurrency] ?? summary.total_cny;
+  const totalDisplay = summary.totals[selectedCurrency];
   const totalChange = summary.trend.length > 1 ? summary.total_cny - summary.trend[0].value_cny : 0;
+
+  function chooseMode(nextMode: StoreMode) {
+    localStorage.setItem(MODE_KEY, nextMode);
+    setMode(nextMode);
+    setSummary(emptySummary(rates));
+    setLocations([]);
+    setSelectedCurrency("CNY");
+    setDataError("");
+    setSyncError("");
+    setSelectedLocation(null);
+    setDrawerOpen(false);
+    setAuthenticated(nextMode === "online" && Boolean(getAuthToken()));
+  }
+
+  function chooseModeLater() {
+    setMode(null);
+    setAuthenticated(false);
+    setAuthError("");
+  }
 
   async function submitLogin(event: FormEvent) {
     event.preventDefault();
     setAuthError("");
     setAuthToken(password);
     try {
-      await api.summary();
+      if (!store || store.mode !== "online") throw new Error("online store is not ready");
+      await store.loadDashboard(new URLSearchParams({ sort: "created_at", order: "desc" }));
       setAuthenticated(true);
       setPassword("");
       await loadDashboard();
@@ -130,10 +197,13 @@ export function App() {
   }
 
   async function syncExchangeRates() {
+    if (!store || !store.canSyncRates) return;
     setSyncing(true);
     setSyncError("");
     try {
-      await api.refreshExchangeRates();
+      const nextRates = await store.refreshExchangeRates();
+      writeRateCache(nextRates);
+      setRates(nextRates);
       await loadDashboard();
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -152,15 +222,28 @@ export function App() {
     if (!confirm(`删除「${location.name}」及其全部历史记录？`)) {
       return;
     }
-    await api.deleteLocation(location.id);
-    if (selectedLocation?.id === location.id) {
-      setSelectedLocation(null);
-      setDrawerOpen(false);
+    try {
+      if (!store) return;
+      await store.deleteLocation(location.id);
+      if (selectedLocation?.id === location.id) {
+        setSelectedLocation(null);
+        setDrawerOpen(false);
+      }
+      await loadDashboard();
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : "删除失败");
     }
-    await loadDashboard();
   }
 
-  if (!authenticated) {
+  if (!ratesReady) {
+    return <main className="flex min-h-screen items-center justify-center px-4 py-8 text-sm text-muted-foreground">正在准备离线数据空间…</main>;
+  }
+
+  if (!mode) {
+    return <ModeChooser onChoose={chooseMode} />;
+  }
+
+  if (mode === "online" && !authenticated) {
     return (
       <main className="flex min-h-screen items-center justify-center px-4 py-8">
         <Card className="w-full max-w-sm p-5">
@@ -186,6 +269,9 @@ export function App() {
               登录
             </Button>
           </form>
+          <button className="mt-4 w-full text-sm text-muted-foreground underline-offset-4 hover:underline" onClick={() => chooseMode("offline")}>
+            不登录，使用本机离线数据
+          </button>
         </Card>
       </main>
     );
@@ -203,8 +289,9 @@ export function App() {
               <h1 className="text-xl font-semibold">个人资产看板</h1>
               <p className="text-sm text-muted-foreground">
                 汇率同步于 {summary.exchange_rates_updated_at}
-                {isMock ? " · 演示数据" : ""}
+                {mode === "offline" ? " · 本机离线数据" : " · 云端数据"}
                 {syncError ? <span className="text-rose-500"> · {syncError}</span> : null}
+                {dataError ? <span className="text-rose-500"> · {dataError}</span> : null}
               </p>
             </div>
           </div>
@@ -213,19 +300,13 @@ export function App() {
               <DatabaseBackup className="h-4 w-4" />
               <span className="hidden sm:inline">数据备份</span>
             </Button>
-            <Button onClick={() => void syncExchangeRates()} disabled={refreshing || syncing} title="手动同步汇率">
+            {mode === "online" && <Button onClick={() => void syncExchangeRates()} disabled={refreshing || syncing} title="手动同步汇率">
               <RefreshCw className={cn("h-4 w-4", (refreshing || syncing) && "animate-spin")} />
               <span className="hidden sm:inline">手动同步</span>
               <span className="sm:hidden">同步</span>
-            </Button>
-            <Button
-              onClick={() => {
-                setAuthToken("");
-                setAuthenticated(false);
-              }}
-            >
-              退出
-            </Button>
+            </Button>}
+            {mode === "online" && <Button onClick={() => { setAuthToken(""); setAuthenticated(false); }}>退出登录</Button>}
+            <Button onClick={chooseModeLater} title="切换在线或离线模式">切换模式</Button>
             <Button onClick={() => setDark((value) => !value)} title="切换主题">
               {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
@@ -239,10 +320,10 @@ export function App() {
                 <p className="text-sm text-muted-foreground">总资产</p>
                 <div className="mt-2 flex flex-wrap items-end gap-3">
                   <strong className="text-4xl font-semibold tracking-normal sm:text-5xl">
-                    {formatMoney(totalDisplay, selectedCurrency)}
+                    {totalDisplay === undefined ? "不可换算" : formatMoney(totalDisplay, selectedCurrency)}
                   </strong>
                   <Select value={selectedCurrency} onChange={(event) => setSelectedCurrency(event.target.value)}>
-                    {summary.currencies.map((currency) => (
+                    {summary.available_currencies.map((currency) => (
                       <option key={currency} value={currency}>
                         {currency}
                       </option>
@@ -255,6 +336,7 @@ export function App() {
                 {formatMoney(Math.abs(totalChange), "CNY")}
               </div>
             </div>
+            {summary.unsupported_currencies.length > 0 && <p className="mt-3 text-xs text-amber-600">未缓存汇率：{summary.unsupported_currencies.join("、")}。这些币种不会计入换算总额。</p>}
             <div className="mt-6 h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={summary.trend} margin={{ top: 10, right: 10, bottom: 0, left: 0 }}>
@@ -332,18 +414,21 @@ export function App() {
             />
           ))}
         </section>
+        {locations.length === 0 && !refreshing && <Card className="p-8 text-center text-sm text-muted-foreground">还没有资产数据，点击“新增资产位置”开始记录。</Card>}
       </div>
 
       <AssetDrawer
         open={drawerOpen}
         location={selectedLocation}
-        isMock={isMock}
+        store={store}
         onClose={() => setDrawerOpen(false)}
         onChanged={() => void loadDashboard()}
       />
       <LocationForm
         open={locationFormOpen}
         location={editingLocation}
+        store={store}
+        availableCurrencies={availableCurrencies}
         onClose={() => setLocationFormOpen(false)}
         onSaved={(location) => {
           setLocationFormOpen(false);
@@ -351,12 +436,48 @@ export function App() {
           void loadDashboard();
         }}
       />
-      <BackupDialog open={backupOpen} onClose={() => setBackupOpen(false)} onRestored={() => void loadDashboard()} />
+      <BackupDialog
+        open={backupOpen}
+        store={store}
+        onClose={() => setBackupOpen(false)}
+        onRestored={(result) => {
+          if (result.rates) setRates(result.rates);
+          void loadDashboard();
+        }}
+      />
     </main>
   );
 }
 
-function BackupDialog({ open, onClose, onRestored }: { open: boolean; onClose: () => void; onRestored: () => void }) {
+function ModeChooser({ onChoose }: { onChoose: (mode: StoreMode) => void }) {
+  return (
+    <main className="flex min-h-screen items-center justify-center px-4 py-8">
+      <Card className="w-full max-w-lg p-6">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-background">
+            <WalletCards className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-lg font-semibold">个人资产看板</h1>
+            <p className="text-sm text-muted-foreground">选择本次使用的数据空间</p>
+          </div>
+        </div>
+        <div className="mt-6 grid gap-3 sm:grid-cols-2">
+          <button className="rounded-lg border border-border bg-card p-4 text-left transition hover:bg-muted" onClick={() => onChoose("online")}>
+            <p className="font-medium">登录云端数据</p>
+            <p className="mt-2 text-sm text-muted-foreground">连接 Cloudflare API，读取和保存云端资产。</p>
+          </button>
+          <button className="rounded-lg border border-border bg-card p-4 text-left transition hover:bg-muted" onClick={() => onChoose("offline")}>
+            <p className="font-medium">使用本机离线数据</p>
+            <p className="mt-2 text-sm text-muted-foreground">不登录，数据只保存在当前浏览器。</p>
+          </button>
+        </div>
+      </Card>
+    </main>
+  );
+}
+
+function BackupDialog({ open, store, onClose, onRestored }: { open: boolean; store: DashboardStore | null; onClose: () => void; onRestored: (result: RestoreResult) => void }) {
   const [backup, setBackup] = useState<BackupFile | null>(null);
   const [fileName, setFileName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -378,7 +499,9 @@ function BackupDialog({ open, onClose, onRestored }: { open: boolean; onClose: (
     setBusy(true);
     setError("");
     try {
-      const blob = await api.downloadBackup();
+      if (!store) throw new Error("store is not ready");
+      const backup = await store.exportBackup();
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -400,10 +523,7 @@ function BackupDialog({ open, onClose, onRestored }: { open: boolean; onClose: (
     if (!file) return;
     try {
       const parsed = JSON.parse(await file.text()) as BackupFile;
-      if (parsed.format !== "cf-personal-asset-dashboard" || parsed.version !== 1 || !Array.isArray(parsed.data?.asset_locations) || !Array.isArray(parsed.data?.asset_history)) {
-        throw new Error("invalid backup");
-      }
-      setBackup(parsed);
+      setBackup(parseBackup(parsed));
       setFileName(file.name);
     } catch {
       setError("无法识别该备份文件，请选择由本看板导出的 JSON 文件");
@@ -415,11 +535,12 @@ function BackupDialog({ open, onClose, onRestored }: { open: boolean; onClose: (
     setBusy(true);
     setError("");
     try {
-      const result = await api.restoreBackup(backup);
+      if (!store) throw new Error("store is not ready");
+      const result = await store.restoreBackup(backup);
       setMessage(`恢复完成：${result.locations} 个资产位置，${result.history_records} 条金额记录`);
       setBackup(null);
       setFileName("");
-      onRestored();
+      onRestored(result);
     } catch {
       setError("恢复失败，当前数据未被替换。请检查备份文件内容");
     } finally {
@@ -579,11 +700,15 @@ function AssetCard({
 function LocationForm({
   open,
   location,
+  store,
+  availableCurrencies,
   onClose,
   onSaved
 }: {
   open: boolean;
   location: AssetLocation | null;
+  store: DashboardStore | null;
+  availableCurrencies: string[];
   onClose: () => void;
   onSaved: (location: AssetLocation) => void;
 }) {
@@ -618,14 +743,15 @@ function LocationForm({
       tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean)
     };
     try {
-      const response = location
-        ? await api.updateLocation(location.id, payload)
-        : await api.createLocation({ ...payload, current_amount: Number(initialAmount) });
+      if (!store) throw new Error("store is not ready");
+      const response = await store.saveLocation(location?.id || null, payload);
       onSaved(response.item);
     } catch (err) {
-      setError(err instanceof ApiError && err.status === 400 ? "请检查货币类型、名称或历史记录限制" : "保存失败");
+      setError(err instanceof Error ? err.message : "保存失败");
     }
   }
+
+  const currencyOptions = Array.from(new Set([...availableCurrencies, ...(location ? [location.currency] : [])]));
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/30 px-4 backdrop-blur-sm">
@@ -640,7 +766,7 @@ function LocationForm({
           <Field value={name} onChange={(event) => setName(event.target.value)} placeholder="资产名称，如 招商银行卡" />
           <div className="grid gap-3 sm:grid-cols-2">
             <Select value={currency} onChange={(event) => setCurrency(event.target.value)} disabled={Boolean(location)}>
-              {["CNY", "USD", "HKD", "EUR", "JPY", "GBP", "SGD"].map((item) => (
+              {currencyOptions.map((item) => (
                 <option key={item} value={item}>
                   {item}
                 </option>
@@ -666,9 +792,10 @@ function LocationForm({
   );
 }
 
-function AssetDrawer({ open, location, isMock, onClose, onChanged }: { open: boolean; location: AssetLocation | null; isMock: boolean; onClose: () => void; onChanged: () => void }) {
-  const [history, setHistory] = useState<AssetHistory[]>(mockHistory);
+function AssetDrawer({ open, location, store, onClose, onChanged }: { open: boolean; location: AssetLocation | null; store: DashboardStore | null; onClose: () => void; onChanged: () => void }) {
+  const [history, setHistory] = useState<AssetHistory[]>([]);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
+  const [detailError, setDetailError] = useState("");
   const [range, setRange] = useState("all");
   const [showForm, setShowForm] = useState(false);
   const [editingRecord, setEditingRecord] = useState<AssetHistory | null>(null);
@@ -678,24 +805,27 @@ function AssetDrawer({ open, location, isMock, onClose, onChanged }: { open: boo
   const [detailVersion, setDetailVersion] = useState(0);
 
   useEffect(() => {
-    if (!location || !open) {
+    if (!location || !open || !store) {
       return;
     }
+    const currentStore = store;
     async function loadDetails() {
       if (!location) {
         return;
       }
       try {
-        const [nextHistory, nextTrend] = await Promise.all([api.history(location.id), api.trend(location.id, range)]);
-        setHistory(nextHistory.items);
-        setTrend(nextTrend.trend);
-      } catch {
-        setHistory(mockHistory.filter((item) => item.location_id === location.id || location.id === "loc_1"));
-        setTrend(mockLocationTrend(location));
+        const details = await currentStore.loadLocationDetails(location.id, range);
+        setHistory(details.history);
+        setTrend(details.trend);
+        setDetailError("");
+      } catch (error) {
+        setHistory([]);
+        setTrend([]);
+        setDetailError(error instanceof Error ? error.message : "历史数据读取失败");
       }
     }
     void loadDetails();
-  }, [location, open, range, detailVersion]);
+  }, [location, open, range, detailVersion, store]);
 
   if (!open || !location) {
     return null;
@@ -713,9 +843,11 @@ function AssetDrawer({ open, location, isMock, onClose, onChanged }: { open: boo
         note
       };
       if (editingRecord) {
-        await api.updateHistory(editingRecord.id, payload);
+        if (!store) throw new Error("store is not ready");
+        await store.saveHistory(location.id, editingRecord.id, payload);
       } else {
-        await api.createHistory(location.id, payload);
+        if (!store) throw new Error("store is not ready");
+        await store.saveHistory(location.id, null, payload);
       }
       setRecordAmount("");
       setNote("");
@@ -724,8 +856,8 @@ function AssetDrawer({ open, location, isMock, onClose, onChanged }: { open: boo
       setShowForm(false);
       onChanged();
       setDetailVersion((value) => value + 1);
-    } catch {
-      setShowForm(false);
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : "保存失败");
     }
   }
 
@@ -733,9 +865,14 @@ function AssetDrawer({ open, location, isMock, onClose, onChanged }: { open: boo
     if (!confirm("删除这条金额记录？")) {
       return;
     }
-    await api.deleteHistory(record.id);
-    onChanged();
-    setDetailVersion((value) => value + 1);
+    try {
+      if (!store) throw new Error("store is not ready");
+      await store.deleteHistory(record.id);
+      onChanged();
+      setDetailVersion((value) => value + 1);
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : "删除失败");
+    }
   }
 
   function startEditRecord(record: AssetHistory) {
@@ -774,7 +911,7 @@ function AssetDrawer({ open, location, isMock, onClose, onChanged }: { open: boo
           </div>
         </div>
 
-        {isMock && <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">当前展示演示数据，启动 API 后会自动读取真实记录。</p>}
+        {detailError && <p className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-200">{detailError}</p>}
 
         {showForm && (
           <form onSubmit={submitRecord} className="mt-5 grid gap-3 rounded-lg border border-border bg-card p-3">

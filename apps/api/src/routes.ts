@@ -4,17 +4,15 @@ import type { Bindings, AssetHistoryRow, AssetLocationRow } from "./types";
 import { getExchangeRates, refreshExchangeRates } from "./exchange";
 import { recalculateLocationBalance } from "./history";
 import { createBackup, restoreBackup } from "./backup";
-import { buildLocationTrend, buildTotalTrend } from "./trends";
+import { buildLocationTrend } from "./trends";
+import { calculateSummary } from "@asset-dashboard/domain";
 import {
   clampLocationSort,
   clampOrder,
-  fromCny,
   jsonError,
   normalizeCurrency,
   normalizeTags,
-  roundMoney,
   toAssetLocation,
-  toCny,
   toNumber
 } from "./utils";
 
@@ -29,7 +27,11 @@ app.use(
 );
 
 app.use("/api/*", async (c, next) => {
-  if (c.req.method === "OPTIONS" || c.req.path === "/api/health") {
+  if (
+    c.req.method === "OPTIONS" ||
+    c.req.path === "/api/health" ||
+    (c.req.method === "GET" && c.req.path === "/api/exchange-rates")
+  ) {
     return next();
   }
   const password = c.env.DASHBOARD_PASSWORD;
@@ -323,15 +325,5 @@ app.get("/api/summary", async (c) => {
   ]);
   const locations = locationResult.results || [];
   const histories = historyResult.results || [];
-  const totalCny = locations.reduce((sum, location) => sum + toCny(location.current_amount, location.currency, rates.rates), 0);
-  const currencies = Array.from(new Set(["CNY", ...locations.map((location) => location.currency.toUpperCase())]));
-
-  return c.json({
-    base_currency: "CNY",
-    total_cny: roundMoney(totalCny),
-    totals: Object.fromEntries(currencies.map((currency) => [currency, roundMoney(fromCny(totalCny, currency, rates.rates))])),
-    currencies,
-    exchange_rates_updated_at: rates.updated_at,
-    trend: buildTotalTrend(locations, histories, rates.rates)
-  });
+  return c.json(calculateSummary(locations, histories, rates));
 });

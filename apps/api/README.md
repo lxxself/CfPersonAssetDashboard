@@ -37,7 +37,7 @@ GET    /api/backup
 POST   /api/backup/restore
 ```
 
-`GET /api/health` is public. When `DASHBOARD_PASSWORD` is set, every other API route requires `Authorization: Bearer <password>`.
+`GET /api/health` and the read-only `GET /api/exchange-rates` route are public. When `DASHBOARD_PASSWORD` is set, every other API route requires `Authorization: Bearer <password>`.
 
 ## Local development
 

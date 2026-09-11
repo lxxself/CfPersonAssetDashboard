@@ -16,14 +16,15 @@ The application is designed to run in your own Cloudflare account:
 - KV for cached exchange rates
 - Manual exchange-rate refresh through the dashboard
 
-The UI is currently in Simplified Chinese. The repository does not contain a production dataset; the frontend only includes synthetic demo data for offline/error fallback.
+The UI is currently in Simplified Chinese. The repository does not contain a production dataset. The dashboard supports an authenticated cloud mode backed by Cloudflare and a separate browser-local offline mode.
 
 ## Architecture
 
 ```text
 Browser
   ├── Cloudflare Pages (static React app)
-  └── Cloudflare Worker API
+  ├── Browser localStorage (offline asset space and cached rates)
+  └── Cloudflare Worker API (online mode)
         ├── D1: asset locations and balance history
         ├── KV: exchange-rate cache
         └── Exchange-rate provider (only when manual sync is requested)
@@ -38,6 +39,8 @@ Browser
 - Export a complete JSON backup and restore it later.
 - Protect API routes with a single-user Worker secret.
 - Run locally with Wrangler's local D1/KV emulation.
+- Choose between cloud data and browser-local offline data; the two spaces never merge automatically.
+- Reopen the previously visited page offline after the PWA shell has been cached.
 
 ## Repository layout
 
@@ -197,6 +200,7 @@ Do not put `DASHBOARD_PASSWORD` in the Pages environment. The browser asks for t
 
 ```bash
 npm run typecheck
+npm test
 npm run build:web
 npm run preview:web
 ```
@@ -210,7 +214,7 @@ Before using the dashboard, confirm:
 
 ## API overview
 
-When `DASHBOARD_PASSWORD` is configured, all routes except `GET /api/health` and CORS preflight require authentication.
+When `DASHBOARD_PASSWORD` is configured, `GET /api/health` and the read-only `GET /api/exchange-rates` route are public. All asset, summary, backup, restore, and exchange-rate refresh routes require authentication.
 
 ```text
 GET    /api/health
@@ -235,6 +239,9 @@ POST   /api/backup/restore
 
 - The repository has no committed `.env`, `.dev.vars`, backup, API-key, token, or private-key file.
 - Production asset records live in your D1 database and exchange-rate cache in your KV namespace; they are not sent to the frontend build system.
+- Offline asset records live only in the current browser's plaintext `localStorage`; they are not uploaded or merged when you switch to cloud mode. Anyone with access to that browser profile or an extension may read them.
+- The Service Worker caches only the static application shell and same-origin static assets. It never caches `/api/*` responses or requests with an Authorization header.
+- Full offline reopening requires at least one successful online page visit first, so the shell, static assets, and Service Worker can be downloaded; a first-ever direct offline visit is not supported.
 - Manual exchange-rate refresh calls the configured exchange-rate provider. It sends a currency-rate request, not asset names, balances, tags, or history.
 - JSON backups contain all asset names, amounts, tags, notes, and history. Treat them like financial records and do not commit them.
 - The frontend stores the entered password in browser `localStorage` and sends it as a Bearer token over HTTPS. Use a private, trusted browser profile.
@@ -245,7 +252,7 @@ POST   /api/backup/restore
 
 ## Backup and restore
 
-Use **Data Backup** in the dashboard to download a versioned JSON file. Restore replaces all asset locations and history records, so export the current data first and keep more than one backup copy.
+Use **Data Backup** in the dashboard to download a versioned JSON file. Restore replaces all asset locations and history records in the currently selected data space, so export the current data first and keep more than one backup copy. Cloud and offline spaces remain independent; a backup is the deliberate migration path between them.
 
 ## Cloudflare documentation
 
